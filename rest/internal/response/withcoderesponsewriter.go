@@ -13,6 +13,20 @@ type WithCodeResponseWriter struct {
 	Code   int
 }
 
+// NewWithCodeResponseWriter returns a WithCodeResponseWriter.
+// If writer is already a WithCodeResponseWriter, it returns writer directly.
+func NewWithCodeResponseWriter(writer http.ResponseWriter) *WithCodeResponseWriter {
+	switch w := writer.(type) {
+	case *WithCodeResponseWriter:
+		return w
+	default:
+		return &WithCodeResponseWriter{
+			Writer: writer,
+			Code:   http.StatusOK,
+		}
+	}
+}
+
 // Flush flushes the response writer.
 func (w *WithCodeResponseWriter) Flush() {
 	if flusher, ok := w.Writer.(http.Flusher); ok {
@@ -33,6 +47,12 @@ func (w *WithCodeResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	}
 
 	return nil, nil, errors.New("server doesn't support hijacking")
+}
+
+// Unwrap returns the underlying http.ResponseWriter.
+// This is used by http.ResponseController to unwrap the response writer.
+func (w *WithCodeResponseWriter) Unwrap() http.ResponseWriter {
+	return w.Writer
 }
 
 // Write writes bytes into w.

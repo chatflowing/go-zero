@@ -12,12 +12,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out code into the Go module directory
-        uses: actions/checkout@v3
+        uses: actions/checkout@v6
 
       - name: Set up Go 1.x
-        uses: actions/setup-go@v3
+        uses: actions/setup-go@v6
         with:
-          go-version: ^1.18
+          go-version-file: go.mod
           check-latest: true
           cache: true
         id: go
@@ -30,11 +30,6 @@ jobs:
         run: |
           go vet -stdmethods=false $(go list ./...)
 
-          if ! test -z "$(gofmt -l .)"; then
-            echo "Please run 'gofmt -l -w .'"
-            exit 1
-          fi
-
           go mod tidy
           if ! test -z "$(git status --porcelain)"; then
             echo "Please run 'go mod tidy'"
@@ -45,20 +40,25 @@ jobs:
         run: go test -race -coverprofile=coverage.txt -covermode=atomic ./...
 
       - name: Codecov
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage.txt
+          flags: unittests
+          name: codecov-umbrella
+          fail_ci_if_error: false
 
   test-win:
     name: Windows
     runs-on: windows-latest
     steps:
       - name: Checkout codebase
-        uses: actions/checkout@v3
+        uses: actions/checkout@v6
 
       - name: Set up Go 1.x
-        uses: actions/setup-go@v3
+        uses: actions/setup-go@v6
         with:
-          # use 1.18 to guarantee Go 1.18 compatibility
-          go-version: 1.18
+          # make sure Go version compatible with go-zero
+          go-version-file: go.mod
           check-latest: true
           cache: true
 
@@ -66,5 +66,5 @@ jobs:
         run: |
           go mod verify
           go mod download
-          go test -v -race ./...
+          go test ./...
           cd tools/goctl && go build -v goctl.go

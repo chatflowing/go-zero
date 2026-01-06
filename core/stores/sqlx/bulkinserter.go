@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zeromicro/go-zero/core/executors"
@@ -24,12 +25,13 @@ type (
 	ResultHandler func(sql.Result, error)
 
 	// A BulkInserter is used to batch insert records.
-	// Postgresql is not supported yet, because of the sql is formated with symbol `$`.
-	// Oracle is not supported yet, because of the sql is formated with symbol `:`.
+	// Postgresql is not supported yet, because of the sql is formatted with symbol `$`.
+	// Oracle is not supported yet, because of the sql is formatted with symbol `:`.
 	BulkInserter struct {
 		executor *executors.PeriodicalExecutor
 		inserter *dbInserter
 		stmt     bulkStmt
+		lock     sync.RWMutex // guards stmt
 	}
 
 	bulkStmt struct {
@@ -65,6 +67,9 @@ func (bi *BulkInserter) Flush() {
 
 // Insert inserts given args.
 func (bi *BulkInserter) Insert(args ...any) error {
+	bi.lock.RLock()
+	defer bi.lock.RUnlock()
+
 	value, err := format(bi.stmt.valueFormat, args...)
 	if err != nil {
 		return err
@@ -95,6 +100,11 @@ func (bi *BulkInserter) UpdateStmt(stmt string) error {
 		return err
 	}
 
+	bi.lock.Lock()
+	defer bi.lock.Unlock()
+
+	// with write lock, it doesn't matter what's the order of setting bi.stmt and calling flush.
+	bi.stmt = bkStmt
 	bi.executor.Flush()
 	bi.executor.Sync(func() {
 		bi.inserter.stmt = bkStmt

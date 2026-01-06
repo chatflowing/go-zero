@@ -66,8 +66,8 @@ func (g *Generator) genServerGroup(ctx DirContext, proto parser.Proto, cfg *conf
 		svcImport := fmt.Sprintf(`"%v"`, ctx.GetSvc().Package)
 		pbImport := fmt.Sprintf(`"%v"`, ctx.GetPb().Package)
 
-		imports := collection.NewSet()
-		imports.AddStr(logicImport, svcImport, pbImport)
+		imports := collection.NewSet[string]()
+		imports.Add(logicImport, svcImport, pbImport)
 
 		head := util.GetHead(proto.Name)
 
@@ -92,9 +92,9 @@ func (g *Generator) genServerGroup(ctx DirContext, proto parser.Proto, cfg *conf
 		if err = util.With("server").GoFmt(true).Parse(text).SaveTo(map[string]any{
 			"head": head,
 			"unimplementedServer": fmt.Sprintf("%s.Unimplemented%sServer", proto.PbPackage,
-				stringx.From(service.Name).ToCamel()),
+				parser.CamelCase(service.Name)),
 			"server":    stringx.From(service.Name).ToCamel(),
-			"imports":   strings.Join(imports.KeysStr(), pathx.NL),
+			"imports":   strings.Join(imports.Keys(), pathx.NL),
 			"funcs":     strings.Join(funcList, pathx.NL),
 			"notStream": notStream,
 		}, serverFile, true); err != nil {
@@ -111,8 +111,8 @@ func (g *Generator) genServerInCompatibility(ctx DirContext, proto parser.Proto,
 	svcImport := fmt.Sprintf(`"%v"`, ctx.GetSvc().Package)
 	pbImport := fmt.Sprintf(`"%v"`, ctx.GetPb().Package)
 
-	imports := collection.NewSet()
-	imports.AddStr(logicImport, svcImport, pbImport)
+	imports := collection.NewSet[string]()
+	imports.Add(logicImport, svcImport, pbImport)
 
 	head := util.GetHead(proto.Name)
 	service := proto.Service[0]
@@ -143,9 +143,9 @@ func (g *Generator) genServerInCompatibility(ctx DirContext, proto parser.Proto,
 	return util.With("server").GoFmt(true).Parse(text).SaveTo(map[string]any{
 		"head": head,
 		"unimplementedServer": fmt.Sprintf("%s.Unimplemented%sServer", proto.PbPackage,
-			stringx.From(service.Name).ToCamel()),
+			parser.CamelCase(service.Name)),
 		"server":    stringx.From(service.Name).ToCamel(),
-		"imports":   strings.Join(imports.KeysStr(), pathx.NL),
+		"imports":   strings.Join(imports.Keys(), pathx.NL),
 		"funcs":     strings.Join(funcList, pathx.NL),
 		"notStream": notStream,
 	}, serverFile, true)

@@ -3,7 +3,6 @@ package handler
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -11,7 +10,6 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/zeromicro/go-zero/core/color"
@@ -26,25 +24,27 @@ import (
 )
 
 const (
-	limitBodyBytes       = 1024
-	defaultSlowThreshold = time.Millisecond * 500
+	limitBodyBytes          = 1024
+	limitDetailedBodyBytes  = 4096
+	defaultSlowThreshold    = time.Millisecond * 500
+	defaultSSESlowThreshold = time.Minute * 3
 )
 
-var slowThreshold = syncx.ForAtomicDuration(defaultSlowThreshold)
+var (
+	slowThreshold    = syncx.ForAtomicDuration(defaultSlowThreshold)
+	sseSlowThreshold = syncx.ForAtomicDuration(defaultSSESlowThreshold)
+)
 
 // LogHandler returns a middleware that logs http request and response.
 func LogHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		timer := utils.NewElapsedTimer()
 		logs := new(internal.LogCollector)
-		lrw := response.WithCodeResponseWriter{
-			Writer: w,
-			Code:   http.StatusOK,
-		}
+		lrw := response.NewWithCodeResponseWriter(w)
 
 		var dup io.ReadCloser
-		r.Body, dup = iox.DupReadCloser(r.Body)
-		next.ServeHTTP(&lrw, r.WithContext(context.WithValue(r.Context(), internal.LogContext, logs)))
+		r.Body, dup = iox.LimitDupReadCloser(r.Body, limitBodyBytes)
+		next.ServeHTTP(lrw, r.WithContext(internal.WithLogCollector(r.Context(), logs)))
 		r.Body = dup
 		logBrief(r, lrw.Code, timer, logs)
 	})
@@ -55,7 +55,8 @@ type detailLoggedResponseWriter struct {
 	buf    *bytes.Buffer
 }
 
-func newDetailLoggedResponseWriter(writer *response.WithCodeResponseWriter, buf *bytes.Buffer) *detailLoggedResponseWriter {
+func newDetailLoggedResponseWriter(writer *response.WithCodeResponseWriter,
+	buf *bytes.Buffer) *detailLoggedResponseWriter {
 	return &detailLoggedResponseWriter{
 		writer: writer,
 		buf:    buf,
@@ -94,15 +95,14 @@ func DetailedLogHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		timer := utils.NewElapsedTimer()
 		var buf bytes.Buffer
-		lrw := newDetailLoggedResponseWriter(&response.WithCodeResponseWriter{
-			Writer: w,
-			Code:   http.StatusOK,
-		}, &buf)
+		rw := response.NewWithCodeResponseWriter(w)
+		lrw := newDetailLoggedResponseWriter(rw, &buf)
 
 		var dup io.ReadCloser
-		r.Body, dup = iox.DupReadCloser(r.Body)
+		// https://github.com/zeromicro/go-zero/issues/3564
+		r.Body, dup = iox.LimitDupReadCloser(r.Body, limitDetailedBodyBytes)
 		logs := new(internal.LogCollector)
-		next.ServeHTTP(lrw, r.WithContext(context.WithValue(r.Context(), internal.LogContext, logs)))
+		next.ServeHTTP(lrw, r.WithContext(internal.WithLogCollector(r.Context(), logs)))
 		r.Body = dup
 		logDetails(r, lrw, timer, logs)
 	})
@@ -113,6 +113,11 @@ func SetSlowThreshold(threshold time.Duration) {
 	slowThreshold.Set(threshold)
 }
 
+// SetSSESlowThreshold sets the slow threshold for SSE requests.
+func SetSSESlowThreshold(threshold time.Duration) {
+	sseSlowThreshold.Set(threshold)
+}
+
 func dumpRequest(r *http.Request) string {
 	reqContent, err := httputil.DumpRequest(r, true)
 	if err != nil {
@@ -120,6 +125,14 @@ func dumpRequest(r *http.Request) string {
 	}
 
 	return string(reqContent)
+}
+
+func getSlowThreshold(r *http.Request) time.Duration {
+	if r.Header.Get(headerAccept) == valueSSE {
+		return sseSlowThreshold.Load()
+	} else {
+		return slowThreshold.Load()
+	}
 }
 
 func isOkResponse(code int) bool {
@@ -133,7 +146,8 @@ func logBrief(r *http.Request, code int, timer *utils.ElapsedTimer, logs *intern
 	logger := logx.WithContext(r.Context()).WithDuration(duration)
 	buf.WriteString(fmt.Sprintf("[HTTP] %s - %s %s - %s - %s",
 		wrapStatusCode(code), wrapMethod(r.Method), r.RequestURI, httpx.GetRemoteAddr(r), r.UserAgent()))
-	if duration > slowThreshold.Load() {
+
+	if duration > getSlowThreshold(r) {
 		logger.Slowf("[HTTP] %s - %s %s - %s - %s - slowcall(%s)",
 			wrapStatusCode(code), wrapMethod(r.Method), r.RequestURI, httpx.GetRemoteAddr(r), r.UserAgent(),
 			timex.ReprOfDuration(duration))
@@ -141,14 +155,7 @@ func logBrief(r *http.Request, code int, timer *utils.ElapsedTimer, logs *intern
 
 	ok := isOkResponse(code)
 	if !ok {
-		fullReq := dumpRequest(r)
-		limitReader := io.LimitReader(strings.NewReader(fullReq), limitBodyBytes)
-		body, err := io.ReadAll(limitReader)
-		if err != nil {
-			buf.WriteString(fmt.Sprintf("\n%s", fullReq))
-		} else {
-			buf.WriteString(fmt.Sprintf("\n%s", string(body)))
-		}
+		buf.WriteString(fmt.Sprintf("\n%s", dumpRequest(r)))
 	}
 
 	body := logs.Flush()
@@ -171,9 +178,10 @@ func logDetails(r *http.Request, response *detailLoggedResponseWriter, timer *ut
 	logger := logx.WithContext(r.Context())
 	buf.WriteString(fmt.Sprintf("[HTTP] %s - %d - %s - %s\n=> %s\n",
 		r.Method, code, r.RemoteAddr, timex.ReprOfDuration(duration), dumpRequest(r)))
-	if duration > defaultSlowThreshold {
+
+	if duration > getSlowThreshold(r) {
 		logger.Slowf("[HTTP] %s - %d - %s - slowcall(%s)\n=> %s\n", r.Method, code, r.RemoteAddr,
-			fmt.Sprintf("slowcall(%s)", timex.ReprOfDuration(duration)), dumpRequest(r))
+			timex.ReprOfDuration(duration), dumpRequest(r))
 	}
 
 	body := logs.Flush()

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/logrusorgru/aurora"
+	"github.com/gookit/color"
 	"github.com/spf13/cobra"
 	"github.com/zeromicro/go-zero/tools/goctl/util"
 	"github.com/zeromicro/go-zero/tools/goctl/util/env"
@@ -42,7 +42,7 @@ type Docker struct {
 func dockerCommand(_ *cobra.Command, _ []string) (err error) {
 	defer func() {
 		if err == nil {
-			fmt.Println(aurora.Green("Done."))
+			fmt.Println(color.Green.Render("Done."))
 		}
 	}()
 
@@ -73,6 +73,7 @@ func dockerCommand(_ *cobra.Command, _ []string) (err error) {
 
 	base := varStringBase
 	port := varIntPort
+	etcDir := filepath.Join(filepath.Dir(goFile), etcDir)
 	if _, err := os.Stat(etcDir); os.IsNotExist(err) {
 		return generateDockerfile(goFile, base, port, version, timezone)
 	}
@@ -170,7 +171,7 @@ func generateDockerfile(goFile, base string, port int, version, timezone string,
 	t := template.Must(template.New("dockerfile").Parse(text))
 	return t.Execute(out, Docker{
 		Chinese:     env.InChina(),
-		GoMainFrom:  path.Join(projPath, goFile),
+		GoMainFrom:  path.Join(projPath, filepath.Base(goFile)),
 		GoRelPath:   projPath,
 		GoFile:      goFile,
 		ExeFile:     exeName,

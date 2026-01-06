@@ -21,6 +21,7 @@ type (
 		FindOneByQuery(ctx context.Context, filter queryinfo.Expression) (*{{.upperStartCamelObject}}, error)
 		FindCount(ctx context.Context, filter queryinfo.Expression) (int64, error)
 		FindAll(ctx context.Context, filter queryinfo.Expression, order []queryinfo.OrderedExpression, limit int64, offset int64) ([]*{{.upperStartCamelObject}}, error)
+		{{if not .withCache}}withSession(session sqlx.Session) {{.upperStartCamelObject}}Model{{end}}
 	}
 
 	custom{{.upperStartCamelObject}}Model struct {
@@ -88,3 +89,10 @@ func (m *default{{.upperStartCamelObject}}Model) FindAll(ctx context.Context, fi
 		return nil, err
 	}
 }
+
+{{if not .withCache}}
+func (m *custom{{.upperStartCamelObject}}Model) withSession(session sqlx.Session) {{.upperStartCamelObject}}Model {
+    return New{{.upperStartCamelObject}}Model(sqlx.NewSqlConnFromSession(session))
+}
+{{end}}
+

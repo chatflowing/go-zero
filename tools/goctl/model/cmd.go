@@ -46,7 +46,7 @@ func init() {
 	datasourceCmdFlags.StringVar(&command.VarStringBranch, "branch")
 
 	pgDatasourceCmdFlags.StringVar(&command.VarStringURL, "url")
-	pgDatasourceCmdFlags.StringVarP(&command.VarStringTable, "table", "t")
+	pgDatasourceCmdFlags.StringSliceVarP(&command.VarStringSliceTable, "table", "t")
 	pgDatasourceCmdFlags.StringVarPWithDefaultValue(&command.VarStringSchema, "schema", "s", "public")
 	pgDatasourceCmdFlags.BoolVarP(&command.VarBoolCache, "cache", "c")
 	pgDatasourceCmdFlags.StringVarP(&command.VarStringDir, "dir", "d")
@@ -56,9 +56,13 @@ func init() {
 	pgDatasourceCmdFlags.StringVar(&command.VarStringHome, "home")
 	pgDatasourceCmdFlags.StringVar(&command.VarStringRemote, "remote")
 	pgDatasourceCmdFlags.StringVar(&command.VarStringBranch, "branch")
+	pgCmd.PersistentFlags().StringSliceVarPWithDefaultValue(&command.VarStringSliceIgnoreColumns,
+		"ignore-columns", "i", []string{"create_at", "created_at", "create_time", "update_at", "updated_at", "update_time"})
+	pgCmd.PersistentFlags().StringVarPWithDefaultValue(&command.VarStringCachePrefix, "prefix", "p", "cache")
 
 	mongoCmdFlags.StringSliceVarP(&mongo.VarStringSliceType, "type", "t")
 	mongoCmdFlags.BoolVarP(&mongo.VarBoolCache, "cache", "c")
+	mongoCmdFlags.StringVarP(&mongo.VarStringPrefix, "prefix", "p")
 	mongoCmdFlags.BoolVarP(&mongo.VarBoolEasy, "easy", "e")
 	mongoCmdFlags.StringVarP(&mongo.VarStringDir, "dir", "d")
 	mongoCmdFlags.StringVar(&mongo.VarStringStyle, "style")
@@ -67,7 +71,9 @@ func init() {
 	mongoCmdFlags.StringVar(&mongo.VarStringBranch, "branch")
 
 	mysqlCmd.PersistentFlags().BoolVar(&command.VarBoolStrict, "strict")
-	mysqlCmd.PersistentFlags().StringSliceVarPWithDefaultValue(&command.VarStringSliceIgnoreColumns, "ignore-columns", "i", []string{"create_at", "created_at", "create_time", "update_at", "updated_at", "update_time"})
+	mysqlCmd.PersistentFlags().StringSliceVarPWithDefaultValue(&command.VarStringSliceIgnoreColumns,
+		"ignore-columns", "i", []string{"create_at", "created_at", "create_time", "update_at", "updated_at", "update_time"})
+	mysqlCmd.PersistentFlags().StringVarPWithDefaultValue(&command.VarStringCachePrefix, "prefix", "p", "cache")
 
 	mysqlCmd.AddCommand(datasourceCmd, ddlCmd)
 	pgCmd.AddCommand(pgDatasourceCmd)

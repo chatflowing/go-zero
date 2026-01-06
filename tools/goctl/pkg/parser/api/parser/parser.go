@@ -12,7 +12,15 @@ import (
 	"github.com/zeromicro/go-zero/tools/goctl/pkg/parser/api/token"
 )
 
-const idAPI = "api"
+const (
+	idAPI          = "api"
+	groupKeyText   = "group"
+	infoTitleKey   = "Title"
+	infoDescKey    = "Desc"
+	infoVersionKey = "Version"
+	infoAuthorKey  = "Author"
+	infoEmailKey   = "Email"
+)
 
 // Parser is the parser for api file.
 type Parser struct {
@@ -385,6 +393,9 @@ func (p *Parser) parsePathExpr() *ast.PathExpr {
 		}
 
 		values = append(values, p.curTok)
+		if p.peekTokenIs(token.LPAREN, token.Returns, token.AT_DOC, token.AT_HANDLER, token.SEMICOLON, token.RBRACE) {
+			break
+		}
 		if p.notExpectPeekTokenGotComment(p.curTokenNode().PeekFirstLeadingComment(), token.COLON, token.IDENT, token.INT) {
 			return nil
 		}
@@ -454,6 +465,20 @@ func (p *Parser) parsePathItem() []token.Token {
 			if !p.advanceIfPeekTokenIs(token.IDENT) {
 				return nil
 			}
+			list = append(list, p.curTok)
+		} else if p.peekTokenIs(token.DOT) {
+			// Allow dot (.) in path segments for file extensions like .php, .html, etc.
+			if !p.nextToken() {
+				return nil
+			}
+
+			list = append(list, p.curTok)
+
+			// After a dot, we expect an identifier (e.g., .php, .html)
+			if !p.advanceIfPeekTokenIs(token.IDENT) {
+				return nil
+			}
+
 			list = append(list, p.curTok)
 		} else {
 			if p.peekTokenIs(token.LPAREN, token.Returns, token.AT_DOC, token.AT_HANDLER, token.SEMICOLON, token.RBRACE) {
@@ -534,7 +559,7 @@ func (p *Parser) parseAtDocGroupStmt() ast.AtDocStmt {
 		}
 
 		stmt.Values = append(stmt.Values, expr)
-		if p.notExpectPeekToken(token.RPAREN, token.KEY) {
+		if p.notExpectPeekToken(token.RPAREN, token.IDENT) {
 			return nil
 		}
 	}
@@ -594,7 +619,7 @@ func (p *Parser) parseAtServerStmt() *ast.AtServerStmt {
 		}
 
 		stmt.Values = append(stmt.Values, expr)
-		if p.notExpectPeekToken(token.RPAREN, token.KEY) {
+		if p.notExpectPeekToken(token.RPAREN, token.IDENT) {
 			return nil
 		}
 	}
@@ -1104,7 +1129,7 @@ func (p *Parser) parseInfoStmt() *ast.InfoStmt {
 		}
 
 		stmt.Values = append(stmt.Values, expr)
-		if p.notExpectPeekToken(token.RPAREN, token.KEY) {
+		if p.notExpectPeekToken(token.RPAREN, token.IDENT) {
 			return nil
 		}
 	}
@@ -1123,15 +1148,20 @@ func (p *Parser) parseAtServerKVExpression() *ast.KVExpr {
 	var expr = &ast.KVExpr{}
 
 	// token IDENT
-	if !p.advanceIfPeekTokenIs(token.KEY, token.RPAREN) {
+	if !p.advanceIfPeekTokenIs(token.IDENT, token.RPAREN) {
 		return nil
 	}
 
 	expr.Key = p.curTokenNode()
 
+	if !p.advanceIfPeekTokenIs(token.COLON) {
+		return nil
+	}
+	expr.Colon = p.curTokenNode()
+
 	var valueTok token.Token
 	var leadingCommentGroup ast.CommentGroup
-	if p.notExpectPeekToken(token.QUO, token.DURATION, token.IDENT, token.INT) {
+	if p.notExpectPeekToken(token.QUO, token.DURATION, token.IDENT, token.INT, token.STRING) {
 		return nil
 	}
 
@@ -1141,13 +1171,27 @@ func (p *Parser) parseAtServerKVExpression() *ast.KVExpr {
 		}
 
 		slashTok := p.curTok
+		var pathText = slashTok.Text
 		if !p.advanceIfPeekTokenIs(token.IDENT) {
 			return nil
 		}
 
-		idTok := p.curTok
+		pathText += p.curTok.Text
+		if p.peekTokenIs(token.SUB) { //  parse abc-efg format
+			if !p.nextToken() {
+				return nil
+			}
+
+			pathText += p.curTok.Text
+			if !p.advanceIfPeekTokenIs(token.IDENT) {
+				return nil
+			}
+
+			pathText += p.curTok.Text
+		}
+
 		valueTok = token.Token{
-			Text:     slashTok.Text + idTok.Text,
+			Text:     pathText,
 			Position: slashTok.Position,
 		}
 		leadingCommentGroup = p.curTokenNode().LeadingCommentGroup
@@ -1163,6 +1207,17 @@ func (p *Parser) parseAtServerKVExpression() *ast.KVExpr {
 		expr.Value = node
 		return expr
 	} else if p.peekTokenIs(token.INT) {
+		if !p.nextToken() {
+			return nil
+		}
+
+		valueTok = p.curTok
+		leadingCommentGroup = p.curTokenNode().LeadingCommentGroup
+		node := ast.NewTokenNode(valueTok)
+		node.SetLeadingCommentGroup(leadingCommentGroup)
+		expr.Value = node
+		return expr
+	} else if p.peekTokenIs(token.STRING) {
 		if !p.nextToken() {
 			return nil
 		}
@@ -1208,6 +1263,34 @@ func (p *Parser) parseAtServerKVExpression() *ast.KVExpr {
 			node.SetLeadingCommentGroup(leadingCommentGroup)
 			expr.Value = node
 			return expr
+		} else if p.peekTokenIs(token.SUB) {
+			for {
+				if p.peekTokenIs(token.SUB) {
+					if !p.nextToken() {
+						return nil
+					}
+
+					subTok := p.curTok
+					if !p.advanceIfPeekTokenIs(token.IDENT) {
+						return nil
+					}
+
+					idTok := p.curTok
+					valueTok = token.Token{
+						Text:     valueTok.Text + subTok.Text + idTok.Text,
+						Position: valueTok.Position,
+					}
+					leadingCommentGroup = p.curTokenNode().LeadingCommentGroup
+				} else {
+					break
+				}
+			}
+
+			valueTok.Type = token.PATH
+			node := ast.NewTokenNode(valueTok)
+			node.SetLeadingCommentGroup(leadingCommentGroup)
+			expr.Value = node
+			return expr
 		}
 	}
 
@@ -1218,13 +1301,28 @@ func (p *Parser) parseAtServerKVExpression() *ast.KVExpr {
 			}
 
 			slashTok := p.curTok
+			var pathText = valueTok.Text
+			pathText += slashTok.Text
 			if !p.advanceIfPeekTokenIs(token.IDENT) {
 				return nil
 			}
 
-			idTok := p.curTok
+			pathText += p.curTok.Text
+			if p.peekTokenIs(token.SUB) { //  parse abc-efg format
+				if !p.nextToken() {
+					return nil
+				}
+
+				pathText += p.curTok.Text
+				if !p.advanceIfPeekTokenIs(token.IDENT) {
+					return nil
+				}
+
+				pathText += p.curTok.Text
+			}
+
 			valueTok = token.Token{
-				Text:     valueTok.Text + slashTok.Text + idTok.Text,
+				Text:     pathText,
 				Position: valueTok.Position,
 			}
 			leadingCommentGroup = p.curTokenNode().LeadingCommentGroup
@@ -1245,14 +1343,20 @@ func (p *Parser) parseKVExpression() *ast.KVExpr {
 	var expr = &ast.KVExpr{}
 
 	// token IDENT
-	if !p.advanceIfPeekTokenIs(token.KEY) {
+	if !p.advanceIfPeekTokenIs(token.IDENT) {
 		return nil
 	}
 
 	expr.Key = p.curTokenNode()
 
+	// token COLON
+	if !p.advanceIfPeekTokenIs(token.COLON) {
+		return nil
+	}
+	expr.Colon = p.curTokenNode()
+
 	// token STRING
-	if !p.advanceIfPeekTokenIs(token.STRING) {
+	if !p.advanceIfPeekTokenIs(token.STRING, token.RAW_STRING, token.IDENT) {
 		return nil
 	}
 

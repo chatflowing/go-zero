@@ -42,8 +42,19 @@ var (
 func GoFormatApi(_ *cobra.Command, _ []string) error {
 	var be errorx.BatchError
 	if VarBoolUseStdin {
-		if err := apiFormatReader(os.Stdin, VarStringDir, VarBoolSkipCheckDeclare); err != nil {
-			be.Add(err)
+		if env.UseExperimental() {
+			data, err := io.ReadAll(os.Stdin)
+			if err != nil {
+				be.Add(err)
+			} else {
+				if err := apiF.Source(data, os.Stdout); err != nil {
+					be.Add(err)
+				}
+			}
+		} else {
+			if err := apiFormatReader(os.Stdin, VarStringDir, VarBoolSkipCheckDeclare); err != nil {
+				be.Add(err)
+			}
 		}
 	} else {
 		if len(VarStringDir) == 0 {
@@ -171,7 +182,9 @@ func apiFormat(data string, skipCheckDeclare bool, filename ...string) (string, 
 				tapCount++
 			}
 		}
-		util.WriteIndent(&builder, tapCount)
+		if line != "" {
+			util.WriteIndent(&builder, tapCount)
+		}
 		builder.WriteString(line + pathx.NL)
 		if strings.HasSuffix(noCommentLine, leftParenthesis) || strings.HasSuffix(noCommentLine, leftBrace) {
 			tapCount++

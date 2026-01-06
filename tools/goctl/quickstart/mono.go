@@ -2,7 +2,7 @@ package quickstart
 
 import (
 	_ "embed"
-	"io/ioutil"
+	"os"
 	"path/filepath"
 
 	"github.com/zeromicro/go-zero/core/logx"
@@ -35,7 +35,7 @@ func initAPIFlags() error {
 
 	apiFilename := filepath.Join(apiWorkDir, "greet.api")
 	apiBytes := []byte(apiContent)
-	if err := ioutil.WriteFile(apiFilename, apiBytes, 0o666); err != nil {
+	if err := os.WriteFile(apiFilename, apiBytes, 0o666); err != nil {
 		return err
 	}
 
@@ -59,23 +59,23 @@ func (m mono) createAPIProject() {
 	log.Debug(">> Generating quickstart api project...")
 	logx.Must(gogen.GoCommand(nil, nil))
 	etcFile := filepath.Join(apiWorkDir, "etc", "greet.yaml")
-	logx.Must(ioutil.WriteFile(etcFile, []byte(apiEtcContent), 0o666))
+	logx.Must(os.WriteFile(etcFile, []byte(apiEtcContent), 0o666))
 	logicFile := filepath.Join(apiWorkDir, "internal", "logic", "pinglogic.go")
 	svcFile := filepath.Join(apiWorkDir, "internal", "svc", "servicecontext.go")
 	configPath := filepath.Join(apiWorkDir, "internal", "config")
 	svcPath := filepath.Join(apiWorkDir, "internal", "svc")
 	typesPath := filepath.Join(apiWorkDir, "internal", "types")
-	svcPkg, err := golang.GetParentPackage(svcPath)
+	svcPkg, _, err := golang.GetParentPackage(svcPath)
 	logx.Must(err)
-	typesPkg, err := golang.GetParentPackage(typesPath)
+	typesPkg, _, err := golang.GetParentPackage(typesPath)
 	logx.Must(err)
-	configPkg, err := golang.GetParentPackage(configPath)
+	configPkg, _, err := golang.GetParentPackage(configPath)
 	logx.Must(err)
 
 	var rpcClientPkg string
 	if m.callRPC {
 		rpcClientPath := filepath.Join(rpcWorkDir, "greet")
-		rpcClientPkg, err = golang.GetParentPackage(rpcClientPath)
+		rpcClientPkg, _, err = golang.GetParentPackage(rpcClientPath)
 		logx.Must(err)
 	}
 

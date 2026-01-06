@@ -12,11 +12,14 @@
 
 # ignore
 **/.idea
+**/.vscode
 **/.DS_Store
 **/logs
+**/adhoc
+**/coverage.txt
+**/WARP.md
 
 # for test purpose
-**/adhoc
 go.work
 go.work.sum
 

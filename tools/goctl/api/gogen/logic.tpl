@@ -1,3 +1,6 @@
+// Code scaffolded by goctl. Safe to edit.
+// goctl {{.version}}
+
 package {{.pkgName}}
 
 import (
@@ -10,6 +13,7 @@ type {{.logic}} struct {
 	svcCtx *svc.ServiceContext
 }
 
+{{if .hasDoc}}{{.doc}}{{end}}
 func New{{.logic}}(ctx context.Context, svcCtx *svc.ServiceContext) *{{.logic}} {
 	return &{{.logic}}{
 		Logger: logx.WithContext(ctx),

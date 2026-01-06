@@ -81,6 +81,10 @@ func (c *Cache) Del(key string) {
 	delete(c.data, key)
 	c.lruCache.remove(key)
 	c.lock.Unlock()
+
+	// RemoveTimer is called outside the lock to avoid performance impact from this
+	// potentially time-consuming operation. Data integrity is maintained by lruCache,
+	// which will eventually evict any remaining entries when capacity is exceeded.
 	c.timingWheel.RemoveTimer(key)
 }
 
@@ -128,8 +132,8 @@ func (c *Cache) Take(key string, fetch func() (any, error)) (any, error) {
 
 	var fresh bool
 	val, err := c.barrier.Do(key, func() (any, error) {
-		// because O(1) on map search in memory, and fetch is an IO query
-		// so we do double check, cache might be taken by another call
+		// because O(1) on map search in memory, and fetch is an IO query,
+		// so we do double-check, cache might be taken by another call
 		if val, ok := c.doGet(key); ok {
 			return val, nil
 		}

@@ -1,23 +1,29 @@
 package zrpc
 
 import (
-	"log"
+	"context"
+	"fmt"
 	"time"
 
+	"github.com/zeromicro/go-zero/core/conf"
+	"github.com/zeromicro/go-zero/core/logx"
 	"github.com/zeromicro/go-zero/zrpc/internal"
 	"github.com/zeromicro/go-zero/zrpc/internal/auth"
+	"github.com/zeromicro/go-zero/zrpc/internal/balancer/consistenthash"
+	"github.com/zeromicro/go-zero/zrpc/internal/balancer/p2c"
 	"github.com/zeromicro/go-zero/zrpc/internal/clientinterceptors"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 )
-
-const defaultClientKeepaliveTime = 20 * time.Second
 
 var (
 	// WithDialOption is an alias of internal.WithDialOption.
 	WithDialOption = internal.WithDialOption
 	// WithNonBlock sets the dialing to be nonblock.
 	WithNonBlock = internal.WithNonBlock
+	// WithBlock sets the dialing to be blocking.
+	// Deprecated: blocking dials are not recommended by gRPC.
+	WithBlock = internal.WithBlock
 	// WithStreamClientInterceptor is an alias of internal.WithStreamClientInterceptor.
 	WithStreamClientInterceptor = internal.WithStreamClientInterceptor
 	// WithTimeout is an alias of internal.WithTimeout.
@@ -43,10 +49,7 @@ type (
 // MustNewClient returns a Client, exits on any error.
 func MustNewClient(c RpcClientConf, options ...ClientOption) Client {
 	cli, err := NewClient(c, options...)
-	if err != nil {
-		log.Fatal(err)
-	}
-
+	logx.Must(err)
 	return cli
 }
 
@@ -61,6 +64,8 @@ func NewClient(c RpcClientConf, options ...ClientOption) (Client, error) {
 	}
 	if c.NonBlock {
 		opts = append(opts, WithNonBlock())
+	} else {
+		opts = append(opts, WithBlock())
 	}
 	if c.Timeout > 0 {
 		opts = append(opts, WithTimeout(time.Duration(c.Timeout)*time.Millisecond))
@@ -70,6 +75,9 @@ func NewClient(c RpcClientConf, options ...ClientOption) (Client, error) {
 			Time: c.KeepaliveTime,
 		})))
 	}
+
+	svcCfg := makeLBServiceConfig(c.BalancerName)
+	opts = append(opts, WithDialOption(grpc.WithDefaultServiceConfig(svcCfg)))
 
 	opts = append(opts, options...)
 
@@ -90,21 +98,14 @@ func NewClient(c RpcClientConf, options ...ClientOption) (Client, error) {
 
 // NewClientWithTarget returns a Client with connecting to given target.
 func NewClientWithTarget(target string, opts ...ClientOption) (Client, error) {
-	middlewares := ClientMiddlewaresConf{
-		Trace:      true,
-		Duration:   true,
-		Prometheus: true,
-		Breaker:    true,
-		Timeout:    true,
+	var config RpcClientConf
+	if err := conf.FillDefault(&config); err != nil {
+		return nil, err
 	}
 
-	opts = append([]ClientOption{
-		WithDialOption(grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Time: defaultClientKeepaliveTime,
-		})),
-	}, opts...)
+	config.Target = target
 
-	return internal.NewClient(target, middlewares, opts...)
+	return NewClient(config, opts...)
 }
 
 // Conn returns the underlying grpc.ClientConn.
@@ -120,4 +121,22 @@ func DontLogClientContentForMethod(method string) {
 // SetClientSlowThreshold sets the slow threshold on client side.
 func SetClientSlowThreshold(threshold time.Duration) {
 	clientinterceptors.SetSlowThreshold(threshold)
+}
+
+// SetHashKey sets the hash key into context.
+func SetHashKey(ctx context.Context, key string) context.Context {
+	return consistenthash.SetHashKey(ctx, key)
+}
+
+// WithCallTimeout return a call option with given timeout to make a method call.
+func WithCallTimeout(timeout time.Duration) grpc.CallOption {
+	return clientinterceptors.WithCallTimeout(timeout)
+}
+
+func makeLBServiceConfig(balancerName string) string {
+	if len(balancerName) == 0 {
+		balancerName = p2c.Name
+	}
+
+	return fmt.Sprintf(`{"loadBalancingPolicy":"%s"}`, balancerName)
 }

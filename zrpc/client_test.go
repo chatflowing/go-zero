@@ -11,7 +11,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/zeromicro/go-zero/core/discov"
 	"github.com/zeromicro/go-zero/core/logx"
-	"github.com/zeromicro/go-zero/zrpc/internal/mock"
+	"github.com/zeromicro/go-zero/internal/mock"
+	"github.com/zeromicro/go-zero/zrpc/internal/balancer/consistenthash"
+	"github.com/zeromicro/go-zero/zrpc/internal/balancer/p2c"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -43,30 +45,35 @@ func TestDepositServer_Deposit(t *testing.T) {
 	tests := []struct {
 		name    string
 		amount  float32
+		timeout time.Duration
 		res     *mock.DepositResponse
 		errCode codes.Code
 		errMsg  string
 	}{
 		{
-			"invalid request with negative amount",
-			-1.11,
-			nil,
-			codes.InvalidArgument,
-			fmt.Sprintf("cannot deposit %v", -1.11),
+			name:    "invalid request with negative amount",
+			amount:  -1.11,
+			errCode: codes.InvalidArgument,
+			errMsg:  fmt.Sprintf("cannot deposit %v", -1.11),
 		},
 		{
-			"valid request with non negative amount",
-			0.00,
-			&mock.DepositResponse{Ok: true},
-			codes.OK,
-			"",
+			name:    "valid request with non negative amount",
+			res:     &mock.DepositResponse{Ok: true},
+			errCode: codes.OK,
 		},
 		{
-			"valid request with long handling time",
-			2000.00,
-			nil,
-			codes.DeadlineExceeded,
-			"context deadline exceeded",
+			name:    "valid request with long handling time",
+			amount:  2000.00,
+			errCode: codes.DeadlineExceeded,
+			errMsg:  "context deadline exceeded",
+		},
+		{
+			name:    "valid request with timeout call option",
+			amount:  2000.00,
+			timeout: time.Second * 3,
+			res:     &mock.DepositResponse{Ok: true},
+			errCode: codes.OK,
+			errMsg:  "",
 		},
 	}
 
@@ -156,9 +163,22 @@ func TestDepositServer_Deposit(t *testing.T) {
 			client := client
 			t.Run(tt.name, func(t *testing.T) {
 				t.Parallel()
+
 				cli := mock.NewDepositServiceClient(client.Conn())
 				request := &mock.DepositRequest{Amount: tt.amount}
-				response, err := cli.Deposit(context.Background(), request)
+
+				var (
+					ctx      = context.Background()
+					response *mock.DepositResponse
+					err      error
+				)
+
+				if tt.timeout > 0 {
+					response, err = cli.Deposit(ctx, request, WithCallTimeout(tt.timeout))
+				} else {
+					response, err = cli.Deposit(ctx, request)
+				}
+
 				if response != nil {
 					assert.True(t, len(response.String()) > 0)
 					if response.GetOk() != tt.res.GetOk() {
@@ -214,4 +234,55 @@ func TestNewClientWithError(t *testing.T) {
 		}),
 	)
 	assert.NotNil(t, err)
+}
+
+func TestNewClientWithTarget(t *testing.T) {
+	_, err := NewClientWithTarget("",
+		WithDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())),
+		WithDialOption(grpc.WithContextDialer(dialer())),
+		WithUnaryClientInterceptor(func(ctx context.Context, method string, req, reply any,
+			cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+			return invoker(ctx, method, req, reply, cc, opts...)
+		}))
+
+	assert.NotNil(t, err)
+}
+
+func TestMakeLBServiceConfig(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "empty name uses default p2c",
+			input:    "",
+			expected: fmt.Sprintf(`{"loadBalancingPolicy":"%s"}`, p2c.Name),
+		},
+		{
+			name:     "custom balancer name",
+			input:    "consistent_hash",
+			expected: `{"loadBalancingPolicy":"consistent_hash"}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := makeLBServiceConfig(tt.input)
+			if got != tt.expected {
+				t.Errorf("expected %q, got %q", tt.expected, got)
+			}
+		})
+	}
+}
+
+func TestSetHashKey(t *testing.T) {
+	ctx := context.Background()
+	key := "abc123"
+
+	ctx = SetHashKey(ctx, key)
+	got := consistenthash.GetHashKey(ctx)
+	assert.Equal(t, key, got)
+
+	assert.Empty(t, consistenthash.GetHashKey(context.Background()))
 }

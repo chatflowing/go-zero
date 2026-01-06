@@ -1,6 +1,7 @@
 package logx
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +17,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/sdk/trace"
 )
 
 var (
@@ -248,6 +251,32 @@ func TestStructedLogDebugf(t *testing.T) {
 	})
 }
 
+func TestStructedLogDebugfn(t *testing.T) {
+	t.Run("debugfn with output", func(t *testing.T) {
+		w := new(mockWriter)
+		old := writer.Swap(w)
+		defer writer.Store(old)
+
+		doTestStructedLog(t, levelDebug, w, func(v ...any) {
+			Debugfn(func() any {
+				return fmt.Sprint(v...)
+			})
+		})
+	})
+
+	t.Run("debugfn without output", func(t *testing.T) {
+		w := new(mockWriter)
+		old := writer.Swap(w)
+		defer writer.Store(old)
+
+		doTestStructedLogEmpty(t, w, InfoLevel, func(v ...any) {
+			Debugfn(func() any {
+				return fmt.Sprint(v...)
+			})
+		})
+	})
+}
+
 func TestStructedLogDebugv(t *testing.T) {
 	w := new(mockWriter)
 	old := writer.Swap(w)
@@ -285,6 +314,32 @@ func TestStructedLogErrorf(t *testing.T) {
 
 	doTestStructedLog(t, levelError, w, func(v ...any) {
 		Errorf("%s", fmt.Sprint(v...))
+	})
+}
+
+func TestStructedLogErrorfn(t *testing.T) {
+	t.Run("errorfn with output", func(t *testing.T) {
+		w := new(mockWriter)
+		old := writer.Swap(w)
+		defer writer.Store(old)
+
+		doTestStructedLog(t, levelError, w, func(v ...any) {
+			Errorfn(func() any {
+				return fmt.Sprint(v...)
+			})
+		})
+	})
+
+	t.Run("errorfn without output", func(t *testing.T) {
+		w := new(mockWriter)
+		old := writer.Swap(w)
+		defer writer.Store(old)
+
+		doTestStructedLogEmpty(t, w, SevereLevel, func(v ...any) {
+			Errorfn(func() any {
+				return fmt.Sprint(v...)
+			})
+		})
 	})
 }
 
@@ -328,6 +383,32 @@ func TestStructedLogInfof(t *testing.T) {
 	})
 }
 
+func TestStructedInfofn(t *testing.T) {
+	t.Run("infofn with output", func(t *testing.T) {
+		w := new(mockWriter)
+		old := writer.Swap(w)
+		defer writer.Store(old)
+
+		doTestStructedLog(t, levelInfo, w, func(v ...any) {
+			Infofn(func() any {
+				return fmt.Sprint(v...)
+			})
+		})
+	})
+
+	t.Run("infofn without output", func(t *testing.T) {
+		w := new(mockWriter)
+		old := writer.Swap(w)
+		defer writer.Store(old)
+
+		doTestStructedLogEmpty(t, w, ErrorLevel, func(v ...any) {
+			Infofn(func() any {
+				return fmt.Sprint(v...)
+			})
+		})
+	})
+}
+
 func TestStructedLogInfov(t *testing.T) {
 	w := new(mockWriter)
 	old := writer.Swap(w)
@@ -345,6 +426,27 @@ func TestStructedLogInfow(t *testing.T) {
 
 	doTestStructedLog(t, levelInfo, w, func(v ...any) {
 		Infow(fmt.Sprint(v...), Field("foo", "bar"))
+	})
+}
+
+func TestStructedLogFieldNil(t *testing.T) {
+	w := new(mockWriter)
+	old := writer.Swap(w)
+	defer writer.Store(old)
+
+	assert.NotPanics(t, func() {
+		var s *string
+		Infow("test", Field("bb", s))
+		var d *nilStringer
+		Infow("test", Field("bb", d))
+		var e *nilError
+		Errorw("test", Field("bb", e))
+	})
+	assert.NotPanics(t, func() {
+		var p panicStringer
+		Infow("test", Field("bb", p))
+		var ps innerPanicStringer
+		Infow("test", Field("bb", ps))
 	})
 }
 
@@ -430,6 +532,17 @@ func TestStructedLogInfoConsoleText(t *testing.T) {
 	})
 }
 
+func TestInfofnWithErrorLevel(t *testing.T) {
+	called := false
+	SetLevel(ErrorLevel)
+	defer SetLevel(DebugLevel)
+	Infofn(func() any {
+		called = true
+		return "info log"
+	})
+	assert.False(t, called)
+}
+
 func TestStructedLogSlow(t *testing.T) {
 	w := new(mockWriter)
 	old := writer.Swap(w)
@@ -447,6 +560,32 @@ func TestStructedLogSlowf(t *testing.T) {
 
 	doTestStructedLog(t, levelSlow, w, func(v ...any) {
 		Slowf(fmt.Sprint(v...))
+	})
+}
+
+func TestStructedLogSlowfn(t *testing.T) {
+	t.Run("slowfn with output", func(t *testing.T) {
+		w := new(mockWriter)
+		old := writer.Swap(w)
+		defer writer.Store(old)
+
+		doTestStructedLog(t, levelSlow, w, func(v ...any) {
+			Slowfn(func() any {
+				return fmt.Sprint(v...)
+			})
+		})
+	})
+
+	t.Run("slowfn without output", func(t *testing.T) {
+		w := new(mockWriter)
+		old := writer.Swap(w)
+		defer writer.Store(old)
+
+		doTestStructedLogEmpty(t, w, SevereLevel, func(v ...any) {
+			Slowfn(func() any {
+				return fmt.Sprint(v...)
+			})
+		})
 	})
 }
 
@@ -570,7 +709,7 @@ func TestErrorfWithWrappedError(t *testing.T) {
 	old := writer.Swap(w)
 	defer writer.Store(old)
 
-	Errorf("hello %w", errors.New(message))
+	Errorf("hello %s", errors.New(message))
 	assert.True(t, strings.Contains(w.String(), "hello there"))
 }
 
@@ -640,15 +779,9 @@ func TestSetup(t *testing.T) {
 		MaxBackups:  3,
 		MaxSize:     1024 * 1024,
 	}))
-	setupLogLevel(LogConf{
-		Level: levelInfo,
-	})
-	setupLogLevel(LogConf{
-		Level: levelError,
-	})
-	setupLogLevel(LogConf{
-		Level: levelSevere,
-	})
+	setupLogLevel(levelInfo)
+	setupLogLevel(levelError)
+	setupLogLevel(levelSevere)
 	_, err := createOutput("")
 	assert.NotNil(t, err)
 	Disable()
@@ -658,6 +791,10 @@ func TestSetup(t *testing.T) {
 
 func TestDisable(t *testing.T) {
 	Disable()
+	defer func() {
+		SetLevel(InfoLevel)
+		atomic.StoreUint32(&encoding, jsonEncodingType)
+	}()
 
 	var opt logOptions
 	WithKeepDays(1)(&opt)
@@ -666,6 +803,7 @@ func TestDisable(t *testing.T) {
 	WithMaxSize(1024)(&opt)
 	assert.Nil(t, Close())
 	assert.Nil(t, Close())
+	assert.Equal(t, uint32(disableLevel), atomic.LoadUint32(&logLevel))
 }
 
 func TestDisableStat(t *testing.T) {
@@ -679,8 +817,19 @@ func TestDisableStat(t *testing.T) {
 	assert.Equal(t, 0, w.builder.Len())
 }
 
+func TestAddWriter(t *testing.T) {
+	const message = "hello there"
+	w := new(mockWriter)
+	AddWriter(w)
+	w1 := new(mockWriter)
+	AddWriter(w1)
+	Error(message)
+	assert.Contains(t, w.String(), message)
+	assert.Contains(t, w1.String(), message)
+}
+
 func TestSetWriter(t *testing.T) {
-	atomic.StoreUint32(&disableLog, 0)
+	atomic.StoreUint32(&logLevel, 0)
 	Reset()
 	SetWriter(nopWriter{})
 	assert.NotNil(t, writer.Load())
@@ -702,6 +851,95 @@ func TestWithKeepDays(t *testing.T) {
 	var opt logOptions
 	fn(&opt)
 	assert.Equal(t, 1, opt.keepDays)
+}
+
+func TestWithField_LogLevel(t *testing.T) {
+	tests := []struct {
+		name  string
+		level uint32
+		fn    func(string, ...LogField)
+		count int32
+	}{
+		{
+			name:  "debug/info",
+			level: DebugLevel,
+			fn:    Infow,
+			count: 1,
+		},
+		{
+			name:  "info/error",
+			level: InfoLevel,
+			fn:    Errorw,
+			count: 1,
+		},
+		{
+			name:  "info/info",
+			level: InfoLevel,
+			fn:    Infow,
+			count: 1,
+		},
+		{
+			name:  "info/severe",
+			level: InfoLevel,
+			fn:    Errorw,
+			count: 1,
+		},
+		{
+			name:  "error/info",
+			level: ErrorLevel,
+			fn:    Infow,
+			count: 0,
+		},
+		{
+			name:  "error/debug",
+			level: ErrorLevel,
+			fn:    Debugw,
+			count: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			olevel := atomic.LoadUint32(&logLevel)
+			SetLevel(tt.level)
+			defer SetLevel(olevel)
+
+			var val countingStringer
+			tt.fn("hello there", Field("foo", &val))
+			assert.Equal(t, tt.count, val.Count())
+		})
+	}
+}
+
+func TestWithField_LogLevelWithContext(t *testing.T) {
+	t.Run("context more than once with info/info", func(t *testing.T) {
+		olevel := atomic.LoadUint32(&logLevel)
+		SetLevel(InfoLevel)
+		defer SetLevel(olevel)
+
+		var val countingStringer
+		ctx := ContextWithFields(context.Background(), Field("foo", &val))
+		logger := WithContext(ctx)
+		logger.Info("hello there")
+		logger.Info("hello there")
+		logger.Info("hello there")
+		assert.True(t, val.Count() > 0)
+	})
+
+	t.Run("context more than once with error/info", func(t *testing.T) {
+		olevel := atomic.LoadUint32(&logLevel)
+		SetLevel(ErrorLevel)
+		defer SetLevel(olevel)
+
+		var val countingStringer
+		ctx := ContextWithFields(context.Background(), Field("foo", &val))
+		logger := WithContext(ctx)
+		logger.Info("hello there")
+		logger.Info("hello there")
+		logger.Info("hello there")
+		assert.Equal(t, int32(0), val.Count())
+	})
 }
 
 func BenchmarkCopyByteSliceAppend(b *testing.B) {
@@ -810,15 +1048,26 @@ func doTestStructedLogConsole(t *testing.T, w *mockWriter, write func(...any)) {
 	assert.True(t, strings.Contains(w.String(), message))
 }
 
+func doTestStructedLogEmpty(t *testing.T, w *mockWriter, level uint32, write func(...any)) {
+	olevel := atomic.LoadUint32(&logLevel)
+	SetLevel(level)
+	defer SetLevel(olevel)
+
+	const message = "hello there"
+	write(message)
+	assert.Empty(t, w.String())
+}
+
 func testSetLevelTwiceWithMode(t *testing.T, mode string, w *mockWriter) {
 	writer.Store(nil)
 	SetUp(LogConf{
-		Mode:       mode,
-		Level:      "debug",
-		Path:       "/dev/null",
-		Encoding:   plainEncoding,
-		Stat:       false,
-		TimeFormat: time.RFC3339,
+		Mode:           mode,
+		Level:          "debug",
+		Path:           "/dev/null",
+		Encoding:       plainEncoding,
+		Stat:           false,
+		TimeFormat:     time.RFC3339,
+		FileTimeFormat: time.DateTime,
 	})
 	SetUp(LogConf{
 		Mode:  mode,
@@ -857,4 +1106,113 @@ func validateFields(t *testing.T, content string, fields map[string]any) {
 			assert.Equal(t, v, m[k], content)
 		}
 	}
+}
+
+type nilError struct {
+	Name string
+}
+
+func (e *nilError) Error() string {
+	return e.Name
+}
+
+type nilStringer struct {
+	Name string
+}
+
+func (s *nilStringer) String() string {
+	return s.Name
+}
+
+type innerPanicStringer struct {
+	Inner *struct {
+		Name string
+	}
+}
+
+func (s innerPanicStringer) String() string {
+	return s.Inner.Name
+}
+
+type panicStringer struct {
+}
+
+func (s panicStringer) String() string {
+	panic("panic")
+}
+
+type countingStringer struct {
+	count int32
+}
+
+func (s *countingStringer) Count() int32 {
+	return atomic.LoadInt32(&s.count)
+}
+
+func (s *countingStringer) String() string {
+	atomic.AddInt32(&s.count, 1)
+	return "countingStringer"
+}
+
+func TestLogKey(t *testing.T) {
+	setupOnce = sync.Once{}
+	MustSetup(LogConf{
+		ServiceName: "any",
+		Mode:        "console",
+		Encoding:    "json",
+		TimeFormat:  timeFormat,
+		FieldKeys: fieldKeyConf{
+			CallerKey:    "_caller",
+			ContentKey:   "_content",
+			DurationKey:  "_duration",
+			LevelKey:     "_level",
+			SpanKey:      "_span",
+			TimestampKey: "_timestamp",
+			TraceKey:     "_trace",
+			TruncatedKey: "_truncated",
+		},
+	})
+
+	t.Cleanup(func() {
+		setupFieldKeys(fieldKeyConf{
+			CallerKey:    defaultCallerKey,
+			ContentKey:   defaultContentKey,
+			DurationKey:  defaultDurationKey,
+			LevelKey:     defaultLevelKey,
+			SpanKey:      defaultSpanKey,
+			TimestampKey: defaultTimestampKey,
+			TraceKey:     defaultTraceKey,
+			TruncatedKey: defaultTruncatedKey,
+		})
+	})
+
+	const message = "hello there"
+	w := new(mockWriter)
+	old := writer.Swap(w)
+	defer writer.Store(old)
+
+	otp := otel.GetTracerProvider()
+	tp := trace.NewTracerProvider(trace.WithSampler(trace.AlwaysSample()))
+	otel.SetTracerProvider(tp)
+	defer otel.SetTracerProvider(otp)
+
+	ctx, span := tp.Tracer("trace-id").Start(context.Background(), "span-id")
+	defer span.End()
+
+	WithContext(ctx).WithDuration(time.Second).Info(message)
+	now := time.Now()
+
+	var m map[string]string
+	if err := json.Unmarshal([]byte(w.String()), &m); err != nil {
+		t.Error(err)
+	}
+	assert.Equal(t, "info", m["_level"])
+	assert.Equal(t, message, m["_content"])
+	assert.Equal(t, "1000.0ms", m["_duration"])
+	assert.Regexp(t, `logx/logs_test.go:\d+`, m["_caller"])
+	assert.NotEmpty(t, m["_trace"])
+	assert.NotEmpty(t, m["_span"])
+	parsedTime, err := time.Parse(timeFormat, m["_timestamp"])
+	assert.True(t, err == nil)
+	assert.Equal(t, now.Minute(), parsedTime.Minute())
 }

@@ -11,7 +11,7 @@ import (
 func TestWithCodeResponseWriter(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "http://localhost", http.NoBody)
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cw := &WithCodeResponseWriter{Writer: w}
+		cw := NewWithCodeResponseWriter(w)
 
 		cw.Header().Set("X-Test", "test")
 		cw.WriteHeader(http.StatusServiceUnavailable)
@@ -34,9 +34,7 @@ func TestWithCodeResponseWriter(t *testing.T) {
 
 func TestWithCodeResponseWriter_Hijack(t *testing.T) {
 	resp := httptest.NewRecorder()
-	writer := &WithCodeResponseWriter{
-		Writer: resp,
-	}
+	writer := NewWithCodeResponseWriter(NewWithCodeResponseWriter(resp))
 	assert.NotPanics(t, func() {
 		writer.Hijack()
 	})
@@ -47,4 +45,16 @@ func TestWithCodeResponseWriter_Hijack(t *testing.T) {
 	assert.NotPanics(t, func() {
 		writer.Hijack()
 	})
+}
+
+func TestWithCodeResponseWriter_Unwrap(t *testing.T) {
+	resp := httptest.NewRecorder()
+	writer := NewWithCodeResponseWriter(resp)
+	unwrapped := writer.Unwrap()
+	assert.Equal(t, resp, unwrapped)
+
+	// Test with a nested WithCodeResponseWriter
+	nestedWriter := NewWithCodeResponseWriter(writer)
+	unwrappedNested := nestedWriter.Unwrap()
+	assert.Equal(t, resp, unwrappedNested)
 }
